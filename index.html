@@ -1044,20 +1044,39 @@ window.buildPoolSchedule = function(){
       });
     }
   }
-  // Répartition en créneaux de `courts` matchs consécutifs, en respectant l'ordre
-  // ci-dessus (donc le 1er match de chaque poule arrive bien dans les 1ers créneaux).
+  // Répartition en créneaux de `courts` matchs max, en respectant l'ordre ci-dessus.
+  // RÈGLE : une équipe ne joue JAMAIS dans 2 créneaux consécutifs (au moins 1 match de repos).
+  // Dans une journée chaque équipe joue une seule fois ; le risque se situe donc à la jonction
+  // entre 2 journées : on écarte du créneau les matchs dont une équipe a joué au créneau précédent.
   const rawSchedule=[];
   let slotIdx=0;
+  let prevSlotTeams = new Set();
+  let forcedCount = 0; // créneaux où le repos n'a pas pu être respecté (cas extrême)
   for(let j=0;j<numJournees;j++){
-    const journeeMatches = allMatches.filter(m=>m.journee===j);
-    for(let i=0;i<journeeMatches.length;i+=courts){
-      const slot = journeeMatches.slice(i,i+courts);
+    const rest = allMatches.filter(m=>m.journee===j);
+    while(rest.length){
+      let slot=[]; const used=new Set();
+      for(let k=0;k<rest.length && slot.length<courts;k++){
+        const m=rest[k];
+        if(prevSlotTeams.has(m.a)||prevSlotTeams.has(m.b)) continue;
+        if(used.has(m.a)||used.has(m.b)) continue;
+        slot.push(m); used.add(m.a); used.add(m.b);
+      }
+      if(!slot.length){ // aucun match possible sans enchaînement (ex. trop de terrains) : on force
+        slot = rest.slice(0,courts);
+        slot.forEach(m=>{ used.add(m.a); used.add(m.b); });
+        forcedCount++;
+      }
+      slot.forEach(m=>rest.splice(rest.indexOf(m),1));
       slot.forEach((m,ci)=>{
         rawSchedule.push({ ...m, court:ci+1, slot:slotIdx });
       });
+      prevSlotTeams = used;
       slotIdx++;
     }
   }
+  // Renumérotation chronologique des matchs (créneau puis terrain) — les scores sont réinitialisés à la génération.
+  rawSchedule.forEach((m,i)=>{ m.matchId = i+1; });
   // + 1 créneau réservé "TAB possible" en toute fin de phase de poules (slot
   // supplémentaire, n'affecte pas le classement, purement informatif/optionnel).
   const tabSlotIdx = slotIdx; // dernier slot = TAB
@@ -1078,6 +1097,7 @@ window.buildPoolSchedule = function(){
   ST.phase='pools';
   saveTournament({ poolSchedule: finalSchedule, poolTabSlot: ST.poolTabSlot, poolBreaks: insertedBreaks, results:{}, phase:'pools', bracketSchedule:[] });
   renderPlanningPreview();
+  if(forcedCount) alert('⚠️ Avec cette configuration ('+courts+' terrains), '+forcedCount+' créneau(x) font jouer une équipe 2 fois de suite : impossible de garantir un match de repos. Réduisez le nombre de terrains.');
 };
 
 // ══════════════════════════════════════════════════════════
